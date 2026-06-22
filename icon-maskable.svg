@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- maskable: 全面塗り（角を透明にしない）。重要な要素は中央の安全圏(内側80%)に収める -->
+  <rect width="512" height="512" fill="#1f2937"/>
+  <circle cx="256" cy="256" r="120" fill="none" stroke="#3b82f6" stroke-width="24"/>
+  <text x="256" y="312" text-anchor="middle" font-family="-apple-system,Segoe UI,sans-serif" font-size="150" font-weight="700" fill="#ffffff">¥</text>
+</svg>
