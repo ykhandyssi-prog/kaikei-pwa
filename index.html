@@ -212,6 +212,11 @@
 
   <div class="card">
     <h3 class="sec">残高の推移（累計）</h3>
+    <div class="seg" id="trendSeg">
+      <button data-gran="day">日</button>
+      <button data-gran="week">週</button>
+      <button class="on" data-gran="month">月</button>
+    </div>
     <div id="trendWrap"></div>
     <div class="muted" id="trendNote"></div>
   </div>
@@ -364,6 +369,7 @@ let settings = JSON.parse(JSON.stringify(DEFAULTS));
 let listMonth = ym(new Date());
 let stMonth = ym(new Date());
 let breakType = "expense";
+let trendGran = "month";
 let curType = "expense";
 let editingId = null;
 let editType = "expense";
@@ -474,6 +480,9 @@ function bindUI(){
   $("stNext").onclick=()=>{ stMonth=shiftMonth(stMonth,1); renderStats(); };
   $("breakSeg").querySelectorAll("button").forEach(b=>{
     b.onclick=()=>{ breakType=b.dataset.type; $("breakSeg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b)); renderBreakdown(); };
+  });
+  $("trendSeg").querySelectorAll("button").forEach(b=>{
+    b.onclick=()=>{ trendGran=b.dataset.gran; $("trendSeg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b)); renderTrend(); };
   });
   $("expJson").onclick=exportJson;
   $("impJson").onclick=()=>$("impFile").click();
@@ -643,39 +652,51 @@ function renderBreakdown(){
     leg.appendChild(li);
   });
 }
+function periodKey(dateStr, gran){
+  if(gran==="day") return dateStr;
+  if(gran==="month") return dateStr.slice(0,7);
+  const d=new Date(dateStr+"T00:00:00"); const off=(d.getDay()+6)%7; d.setDate(d.getDate()-off); // 週の月曜
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function periodLabel(key, gran){
+  if(gran==="month") return Number(key.slice(5))+"月";
+  const p=key.split("-"); return Number(p[1])+"/"+Number(p[2]);
+}
 function renderTrend(){
   const op = settings.opening, hasOp = !!(op && op.date);
-  const note=$("trendNote");
+  const note=$("trendNote"); const gran=trendGran;
   const recs = hasOp ? records.filter(r=> r.date >= op.date) : records;
-  const months=[...new Set(recs.map(r=>r.date.slice(0,7)))].sort();
-  if(months.length===0){
+  if(recs.length===0){
     if(hasOp){ $("trendWrap").innerHTML=`<div class="empty">基準残高 ${yen(op.amount)}<br>記録するとここに推移が出ます</div>`; note.textContent=`※ 基準日 ${op.date} の残高を起点に累計`; }
     else { $("trendWrap").innerHTML='<div class="empty">データがありません</div>'; note.textContent=""; }
     return;
   }
-  const from = hasOp ? op.date : null;
-  const show = months.slice(-12);
-  let cum = hasOp ? op.amount : 0; const pre=months.filter(m=>m<show[0]);
-  pre.forEach(m=> cum += monthNet(m, from));
+  const netByKey={};
+  recs.forEach(r=>{ const k=periodKey(r.date,gran); netByKey[k]=(netByKey[k]||0)+(r.type==="income"?r.amount:-r.amount); });
+  const keys=Object.keys(netByKey).sort();
+  const limit = gran==="day"?30 : (gran==="week"?16 : 12);
+  const show = keys.slice(-limit);
+  let cum = hasOp ? op.amount : 0;
+  keys.filter(k=> k<show[0]).forEach(k=> cum += netByKey[k]);
   const pts=[]; let run=cum;
-  show.forEach(m=>{ run+=monthNet(m, from); pts.push({m,bal:run}); });
+  show.forEach(k=>{ run+=netByKey[k]; pts.push({k, bal:run}); });
   const W=560,H=170,pad=34;
   const vals=pts.map(p=>p.bal); const min=Math.min(0,...vals), max=Math.max(0,...vals);
   const span=(max-min)||1;
   const x=i=> pad + (pts.length===1? (W-2*pad)/2 : i*(W-2*pad)/(pts.length-1));
   const y=v=> H-pad - (v-min)/span*(H-2*pad);
-  let line="", dots="", labs="";
-  pts.forEach((p,i)=>{ line+=(i?"L":"M")+x(i)+" "+y(p.bal); dots+=`<circle cx="${x(i)}" cy="${y(p.bal)}" r="3" fill="var(--accent)"/>`;
-    if(i%Math.ceil(pts.length/6||1)===0||i===pts.length-1) labs+=`<text x="${x(i)}" y="${H-12}" text-anchor="middle" font-size="10" fill="var(--sub)">${p.m.slice(5)}月</text>`; });
+  let line="", dots="", labs=""; const step=Math.ceil(pts.length/6)||1;
+  pts.forEach((p,i)=>{ line+=(i?"L":"M")+x(i).toFixed(1)+" "+y(p.bal).toFixed(1); dots+=`<circle cx="${x(i).toFixed(1)}" cy="${y(p.bal).toFixed(1)}" r="${pts.length>20?2:3}" fill="var(--accent)"/>`;
+    if(i%step===0||i===pts.length-1) labs+=`<text x="${x(i).toFixed(1)}" y="${H-12}" text-anchor="middle" font-size="10" fill="var(--sub)">${periodLabel(p.k,gran)}</text>`; });
   const zero=y(0);
   $("trendWrap").innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">
-    <line x1="${pad}" y1="${zero}" x2="${W-pad}" y2="${zero}" stroke="var(--line)" stroke-dasharray="3 3"/>
+    <line x1="${pad}" y1="${zero.toFixed(1)}" x2="${W-pad}" y2="${zero.toFixed(1)}" stroke="var(--line)" stroke-dasharray="3 3"/>
     <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>${dots}${labs}
     <text x="${pad}" y="16" font-size="11" fill="var(--sub)">${hasOp?"推定残高":"最新残高"} ${yen(pts[pts.length-1].bal)}</text></svg>`;
-  note.textContent = hasOp ? `※ 基準残高 ${yen(op.amount)}（${op.date}）を起点に累計`
-    : (pre.length? `※ ${show[0]}より前の残高 ${yen(cum)} を起点に累計` : "※ 記録開始からの累計");
+  const granName = gran==="day"?"日別":(gran==="week"?"週別":"月別");
+  const unit = gran==="day"?"日":(gran==="week"?"週":"月");
+  note.textContent = (hasOp ? `※ 基準残高 ${yen(op.amount)}（${op.date}）を起点に累計` : "※ 記録開始からの累計") + `／${granName}・記録のある${unit}のみ表示`;
 }
-function monthNet(m, fromDate){ let n=0; recOfMonth(m).forEach(r=>{ if(fromDate && r.date < fromDate) return; n+= r.type==="income"?r.amount:-r.amount; }); return n; }
 
 /* ---------- 設定画面 ---------- */
 function renderSettings(){
