@@ -1,5 +1,5 @@
 // 家計記録 PWA — オフラインキャッシュ
-const CACHE = "kakei-v3";
+const CACHE = "kakei-v4";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon.svg"];
 
 self.addEventListener("install", e => {

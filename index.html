@@ -87,6 +87,13 @@
   .seg button{ flex:1; border:none; background:transparent; color:var(--sub); padding:8px;
     border-radius:7px; font-weight:600; cursor:pointer; font-size:13px; }
   .seg button.on{ background:var(--card); color:var(--ink); box-shadow:var(--shadow); }
+  /* chart hover */
+  .chartwrap{ position:relative; }
+  .charttip{ position:absolute; pointer-events:none; z-index:20; background:var(--ink); color:var(--bg);
+    font-size:11px; line-height:1.5; padding:7px 10px; border-radius:9px; white-space:nowrap;
+    transform:translate(-50%,-100%); opacity:0; transition:opacity .08s; box-shadow:0 2px 10px rgba(0,0,0,.3); }
+  .charttip.show{ opacity:.97; }
+  .charttip b{ font-weight:700; }
   h3.sec{ font-size:13px; color:var(--sub); margin:4px 2px 8px; font-weight:700; }
   /* settings */
   .btnrow{ display:flex; gap:10px; flex-wrap:wrap; }
@@ -680,6 +687,24 @@ function periodLabel(key, gran){
   if(gran==="month") return Number(key.slice(5))+"月";
   const p=key.split("-"); return Number(p[1])+"/"+Number(p[2]);
 }
+function niceScale(min,max,count){
+  if(min===max){ max=min+1; }
+  const span=max-min, raw=span/count, mag=Math.pow(10,Math.floor(Math.log10(raw)));
+  const norm=raw/mag; let step = norm<1.5?1 : norm<3?2 : norm<7?5 : 10; step*=mag;
+  const nlo=Math.floor(min/step)*step, nhi=Math.ceil(max/step)*step;
+  const ticks=[]; for(let v=nlo; v<=nhi+step*0.5; v+=step) ticks.push(Math.round(v));
+  return { ticks, nlo, nhi };
+}
+function yenAxis(n){
+  const a=Math.abs(n);
+  if(a>=10000) return "¥"+(Math.round(n/1000)/10)+"万";
+  return "¥"+Math.round(n).toLocaleString("ja-JP");
+}
+function periodLabelFull(key, gran){
+  if(gran==="month"){ const [y,m]=key.split("-"); return y+"年"+Number(m)+"月"; }
+  const p=key.split("-");
+  return (gran==="week"? "週 ":"")+Number(p[1])+"/"+Number(p[2]);
+}
 function renderTrend(){
   const op = settings.opening, hasOp = !!(op && op.date);
   const note=$("trendNote"); const gran=trendGran;
@@ -698,18 +723,61 @@ function renderTrend(){
   keys.filter(k=> k<show[0]).forEach(k=> cum += netByKey[k]);
   const pts=[]; let run=cum;
   show.forEach(k=>{ run+=netByKey[k]; pts.push({k, bal:run}); });
-  const W=560,H=170,pad=34;
-  const vals=pts.map(p=>p.bal); const min=Math.min(0,...vals), max=Math.max(0,...vals);
-  const span=(max-min)||1;
-  const x=i=> pad + (pts.length===1? (W-2*pad)/2 : i*(W-2*pad)/(pts.length-1));
-  const y=v=> H-pad - (v-min)/span*(H-2*pad);
+
+  const W=560,H=190,padL=54,padR=14,padT=12,padB=28;
+  const vals=pts.map(p=>p.bal);
+  const sc=niceScale(Math.min(0,...vals), Math.max(0,...vals), 4);
+  const lo=sc.nlo, hi=sc.nhi, span=(hi-lo)||1;
+  const x=i=> padL + (pts.length===1? (W-padL-padR)/2 : i*(W-padL-padR)/(pts.length-1));
+  const y=v=> padT + (1-(v-lo)/span)*(H-padT-padB);
+
+  // y軸グリッド＋目盛り
+  let grid="", ylab="";
+  sc.ticks.forEach(t=>{ const yy=y(t).toFixed(1);
+    grid+=`<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="var(--line)" stroke-width="1"${t===0?' stroke-dasharray="3 3"':''}/>`;
+    ylab+=`<text x="${padL-7}" y="${(y(t)+3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--sub)">${yenAxis(t)}</text>`; });
+  // 折れ線・点・x軸ラベル
   let line="", dots="", labs=""; const step=Math.ceil(pts.length/6)||1;
-  pts.forEach((p,i)=>{ line+=(i?"L":"M")+x(i).toFixed(1)+" "+y(p.bal).toFixed(1); dots+=`<circle cx="${x(i).toFixed(1)}" cy="${y(p.bal).toFixed(1)}" r="${pts.length>20?2:3}" fill="var(--accent)"/>`;
-    if(i%step===0||i===pts.length-1) labs+=`<text x="${x(i).toFixed(1)}" y="${H-12}" text-anchor="middle" font-size="10" fill="var(--sub)">${periodLabel(p.k,gran)}</text>`; });
-  const zero=y(0);
-  $("trendWrap").innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">
-    <line x1="${pad}" y1="${zero.toFixed(1)}" x2="${W-pad}" y2="${zero.toFixed(1)}" stroke="var(--line)" stroke-dasharray="3 3"/>
-    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>${dots}${labs}</svg>`;
+  pts.forEach((p,i)=>{ line+=(i?"L":"M")+x(i).toFixed(1)+" "+y(p.bal).toFixed(1);
+    dots+=`<circle cx="${x(i).toFixed(1)}" cy="${y(p.bal).toFixed(1)}" r="${pts.length>20?2:3}" fill="var(--accent)"/>`;
+    if(i%step===0||i===pts.length-1){ const an=i===0?"start":(i===pts.length-1?"end":"middle");
+      labs+=`<text x="${x(i).toFixed(1)}" y="${H-10}" text-anchor="${an}" font-size="10" fill="var(--sub)">${periodLabel(p.k,gran)}</text>`; } });
+
+  const svg=`<svg id="kkSvg" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">
+    ${grid}${ylab}
+    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>${dots}${labs}
+    <line id="kkGuide" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="var(--sub)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+    <g id="kkHL"></g>
+    <rect id="kkHit" x="${padL}" y="${padT}" width="${(W-padL-padR).toFixed(1)}" height="${(H-padT-padB).toFixed(1)}" fill="transparent" style="cursor:crosshair"/>
+  </svg>`;
+  $("trendWrap").innerHTML=`<div class="chartwrap">${svg}<div class="charttip" id="kkTip"></div></div>`;
+
+  // ホバー配線
+  const svgEl=$("kkSvg"), tip=$("kkTip"), guide=$("kkGuide"), hl=$("kkHL"), hit=$("kkHit"), wrap=svgEl.parentNode;
+  const N=pts.length, plotW=(W-padL-padR);
+  function tipHtml(i){ const p=pts[i], net=netByKey[p.k];
+    return `<b>${periodLabelFull(p.k,gran)}</b><br>残高 ${yen(p.bal)}<br>増減 ${net>=0?"+":""}${yen(net)}`; }
+  function showAt(cx){
+    const ctm=svgEl.getScreenCTM(); if(!ctm) return;
+    const pt=svgEl.createSVGPoint(); pt.x=cx; pt.y=0;
+    const vx=pt.matrixTransform(ctm.inverse()).x;
+    let i= N<=1?0 : Math.round((vx-padL)/plotW*(N-1)); i=Math.max(0,Math.min(N-1,i));
+    const px=x(i);
+    guide.setAttribute("x1",px); guide.setAttribute("x2",px); guide.setAttribute("opacity","1");
+    hl.innerHTML=`<circle cx="${px.toFixed(1)}" cy="${y(pts[i].bal).toFixed(1)}" r="4.5" fill="var(--accent)" stroke="var(--card)" stroke-width="2"/>`;
+    tip.innerHTML=tipHtml(i); tip.classList.add("show");
+    const wr=wrap.getBoundingClientRect(), sr=svgEl.getBoundingClientRect();
+    const left= sr.left - wr.left + (px/W)*sr.width;
+    const top = sr.top - wr.top + (y(pts[i].bal)/H)*sr.height - 12;
+    const tw=tip.offsetWidth, th=tip.offsetHeight;
+    tip.style.left=Math.max(tw/2+2, Math.min(wr.width-tw/2-2, left))+"px";
+    tip.style.top=Math.max(th+2, top)+"px";
+  }
+  function hide(){ guide.setAttribute("opacity","0"); hl.innerHTML=""; tip.classList.remove("show"); }
+  hit.addEventListener("pointermove",e=>showAt(e.clientX));
+  hit.addEventListener("pointerdown",e=>showAt(e.clientX));
+  hit.addEventListener("pointerleave",hide);
+
   const granName = gran==="day"?"日別":(gran==="week"?"週別":"月別");
   const unit = gran==="day"?"日":(gran==="week"?"週":"月");
   note.textContent = (hasOp ? `※ 基準残高 ${yen(op.amount)}（${op.date}）を起点に累計` : "※ 記録開始からの累計") + `／${granName}・記録のある${unit}のみ表示`;
