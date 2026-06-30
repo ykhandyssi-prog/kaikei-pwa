@@ -767,11 +767,15 @@ function renderTrend(){
     hl.innerHTML=`<circle cx="${px.toFixed(1)}" cy="${y(pts[i].bal).toFixed(1)}" r="4.5" fill="var(--accent)" stroke="var(--card)" stroke-width="2"/>`;
     tip.innerHTML=tipHtml(i); tip.classList.add("show");
     const wr=wrap.getBoundingClientRect(), sr=svgEl.getBoundingClientRect();
-    const left= sr.left - wr.left + (px/W)*sr.width;
-    const top = sr.top - wr.top + (y(pts[i].bal)/H)*sr.height - 12;
-    const tw=tip.offsetWidth, th=tip.offsetHeight;
-    tip.style.left=Math.max(tw/2+2, Math.min(wr.width-tw/2-2, left))+"px";
-    tip.style.top=Math.max(th+2, top)+"px";
+    const gx= sr.left - wr.left + (px/W)*sr.width;             // ガイド線のX（wrap内）
+    const gy= sr.top - wr.top + (y(pts[i].bal)/H)*sr.height;   // データ点のY（wrap内）
+    const tw=tip.offsetWidth, th=tip.offsetHeight, gp=16;
+    // ガイド線（＝点）を隠さないよう空いている側へ寄せる
+    let left = (gx < wr.width/2) ? gx+gp : gx-gp-tw;
+    left = Math.max(2, Math.min(wr.width-tw-2, left));
+    let top = gy - th/2;
+    top = Math.max(2, Math.min(wr.height-th-2, top));
+    tip.style.transform="none"; tip.style.left=left+"px"; tip.style.top=top+"px";
   }
   function hide(){ guide.setAttribute("opacity","0"); hl.innerHTML=""; tip.classList.remove("show"); }
   hit.addEventListener("pointermove",e=>showAt(e.clientX));
