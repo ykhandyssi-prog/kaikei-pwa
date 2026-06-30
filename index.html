@@ -737,11 +737,14 @@ function renderTrend(){
     grid+=`<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="var(--line)" stroke-width="1"${t===0?' stroke-dasharray="3 3"':''}/>`;
     ylab+=`<text x="${padL-7}" y="${(y(t)+3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--sub)">${yenAxis(t)}</text>`; });
   // 折れ線・点・x軸ラベル
-  let line="", dots="", labs=""; const step=Math.ceil(pts.length/6)||1;
+  let line="", dots=""; const step=Math.ceil(pts.length/6)||1;
   pts.forEach((p,i)=>{ line+=(i?"L":"M")+x(i).toFixed(1)+" "+y(p.bal).toFixed(1);
-    dots+=`<circle cx="${x(i).toFixed(1)}" cy="${y(p.bal).toFixed(1)}" r="${pts.length>20?2:3}" fill="var(--accent)"/>`;
-    if(i%step===0||i===pts.length-1){ const an=i===0?"start":(i===pts.length-1?"end":"middle");
-      labs+=`<text x="${x(i).toFixed(1)}" y="${H-10}" text-anchor="${an}" font-size="10" fill="var(--sub)">${periodLabel(p.k,gran)}</text>`; } });
+    dots+=`<circle cx="${x(i).toFixed(1)}" cy="${y(p.bal).toFixed(1)}" r="${pts.length>20?2:3}" fill="var(--accent)"/>`; });
+  // x軸ラベル：末尾を必ず出すが直前と近すぎるなら置き換えて重なりを防ぐ
+  const li=[]; for(let i=0;i<pts.length;i+=step) li.push(i);
+  if(li[li.length-1]!==pts.length-1){ if(pts.length-1-li[li.length-1] < step*0.6) li[li.length-1]=pts.length-1; else li.push(pts.length-1); }
+  let labs=""; li.forEach(i=>{ const an=i===0?"start":(i===pts.length-1?"end":"middle");
+    labs+=`<text x="${x(i).toFixed(1)}" y="${H-10}" text-anchor="${an}" font-size="10" fill="var(--sub)">${periodLabel(pts[i].k,gran)}</text>`; });
 
   const svg=`<svg id="kkSvg" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">
     ${grid}${ylab}
