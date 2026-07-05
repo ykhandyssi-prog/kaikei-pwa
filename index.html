@@ -306,7 +306,7 @@
   <div class="card">
     <h3 class="sec">負債・定期支払い（登録一覧）</h3>
     <div id="liabList"></div>
-    <p class="muted">追加は「入力」タブの「予定支払い」トグルから。ここでは一覧確認と削除のみ。</p>
+    <p class="muted">追加は「入力」タブの「予定支払い」トグルから。ここでは一覧確認・削除に加え、分割払いには繰上返済（残高から任意の額を差し引く）の入力欄がある。</p>
   </div>
   <div class="card">
     <h3 class="sec">Vault連携</h3>
@@ -718,6 +718,13 @@ function installmentRemainingCount(li, today){
   }
   return Math.max(0, li.totalCount - elapsed);
 }
+function extraPaidTotal(li, today){
+  return (li.extraPayments||[]).filter(p=>p.date<=today).reduce((s,p)=>s+p.amount,0);
+}
+function installmentRemainingBalance(li, today){
+  const scheduledRemaining = installmentRemainingCount(li, today) * li.amount;
+  return Math.max(0, scheduledRemaining - extraPaidTotal(li, today));
+}
 function recurringNextOccurrence(li, today){
   // 回数（totalCount）を設定していれば、満了後は null（そのシリーズは終了）
   let n=0, d=monthlyOccurrenceDate(li.startDate,0);
@@ -733,7 +740,7 @@ function liabilitySummary(){
   let installmentRemain=0, recurringNext=0;
   liabilities.forEach(li=>{
     if(li.type==="installment"){
-      installmentRemain += installmentRemainingCount(li, today) * li.amount;
+      installmentRemain += installmentRemainingBalance(li, today);
     } else {
       if(recurringNextOccurrence(li, today)) recurringNext += li.amount;
     }
@@ -939,8 +946,9 @@ function renderLiabList(){
     const row=document.createElement("div"); row.className="catedit";
     let info;
     if(li.type==="installment"){
-      const remain=installmentRemainingCount(li, today);
-      info = `残り${remain}/${li.totalCount}回・残高${yen(remain*li.amount)}`;
+      const balance=installmentRemainingBalance(li, today);
+      const extra=extraPaidTotal(li, today);
+      info = `残高${yen(balance)}`+(extra>0?`（うち繰上返済累計${yen(extra)}）`:"");
     } else {
       const occ=recurringNextOccurrence(li, today);
       if(!occ) info = "終了（設定回数を満了）";
@@ -949,6 +957,24 @@ function renderLiabList(){
     row.innerHTML = `<span class="nm">${esc(li.name)}<span class="pill">${li.type==="installment"?"分割":"定期"}</span><br><span class="muted">${esc(li.category)}・${info}</span></span><button title="削除">×</button>`;
     row.querySelector("button").onclick=()=>{ deleteLiability(li.id); };
     el.appendChild(row);
+    if(li.type==="installment"){
+      const exRow=document.createElement("div");
+      exRow.style.cssText="display:flex;gap:6px;padding:0 0 12px;align-items:center";
+      exRow.innerHTML=`<input type="number" inputmode="numeric" placeholder="繰上返済額" style="flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)">
+        <input type="date" value="${today}" style="padding:8px 6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)">
+        <button style="border:none;background:var(--accent);color:#fff;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer;white-space:nowrap;flex:none">繰上返済</button>`;
+      const inputs=exRow.querySelectorAll("input"), amtInput=inputs[0], dateInput=inputs[1], btn=exRow.querySelector("button");
+      btn.onclick=()=>{
+        const amt=Math.round(Number(amtInput.value));
+        if(!amt||amt<=0){ toast("金額を入れてください"); return; }
+        const updated=JSON.parse(JSON.stringify(li));
+        updated.extraPayments=updated.extraPayments||[];
+        updated.extraPayments.push({date:dateInput.value||today, amount:amt});
+        saveLiability(updated);
+        toast("繰上返済を記録しました");
+      };
+      el.appendChild(exRow);
+    }
   });
 }
 function addLiability(){
