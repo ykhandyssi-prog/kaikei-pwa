@@ -199,12 +199,18 @@
         <div class="field"><label>カテゴリ</label><select id="liabCategory"></select></div>
         <div class="field"><label>支払手段</label><select id="liabMethod"></select></div>
       </div>
-      <div class="row">
-        <div class="field"><label>1回あたりの金額</label><input id="liabAmount" type="number" inputmode="numeric" placeholder="0" /></div>
-        <div class="field"><label>開始日（初回の支払日）</label><input id="liabStart" type="date" /></div>
+      <div class="field" id="liabBalanceField">
+        <label>未払金（残っている金額）</label>
+        <input id="liabBalance" type="number" inputmode="numeric" placeholder="0" />
       </div>
-      <div class="field" id="liabCountField"><label id="liabCountLabel">回数（全〇回・必須）</label><input id="liabCount" type="number" inputmode="numeric" placeholder="例: 24" /></div>
-      <p class="muted">分割払い＝支払い終了の回数が決まっているもの（残り全回数分を残高から差し引く・回数は必須）。定期支払い＝サブスクなど（クレカ引き落とし・信用情報にも関わるため次回1回分を残高から差し引く。ただし解約すればいつでも止められるので、全期間分は見込まない）。回数は任意で、終わりが決まっていれば入力（満了後は「終了」扱いになり残高計算から外れる）、空欄なら無期限として扱う。毎月同じ日に支払う想定。</p>
+      <div id="liabRecurringFields" style="display:none">
+        <div class="row">
+          <div class="field"><label>1回あたりの金額</label><input id="liabAmount" type="number" inputmode="numeric" placeholder="0" /></div>
+          <div class="field"><label>開始日（初回の支払日）</label><input id="liabStart" type="date" /></div>
+        </div>
+        <div class="field"><label>回数（空欄なら無期限に繰り返す）</label><input id="liabCount" type="number" inputmode="numeric" placeholder="空欄でOK（終わりが決まっていれば入力）" /></div>
+      </div>
+      <p class="muted" id="liabHelp">分割払い＝未払金を直接入力（返済したら「設定」タブの一覧でこの金額を書き換える。回数や日付の計算はしない）。定期支払い＝サブスクなど（クレカ引き落とし・信用情報にも関わるため次回1回分を残高から差し引く。ただし解約すればいつでも止められるので、全期間分は見込まない）。</p>
     </div>
     <button class="save" id="saveBtn">保存する</button>
   </div>
@@ -306,7 +312,7 @@
   <div class="card">
     <h3 class="sec">負債・定期支払い（登録一覧）</h3>
     <div id="liabList"></div>
-    <p class="muted">追加は「入力」タブの「予定支払い」トグルから。ここでは一覧確認・削除に加え、分割払いには繰上返済（残高から任意の額を差し引く）の入力欄がある。</p>
+    <p class="muted">追加は「入力」タブの「予定支払い」トグルから。分割払いは未払金を直接編集できる（返済したらここで金額を書き換える）。定期支払いは削除のみ。</p>
   </div>
   <div class="card">
     <h3 class="sec">Vault連携</h3>
@@ -571,13 +577,8 @@ function bindUI(){
     b.onclick=()=>{
       liabAddType=b.dataset.type;
       $("liabTypeToggle").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
-      if(liabAddType==="installment"){
-        $("liabCountLabel").textContent="回数（全〇回・必須）";
-        $("liabCount").placeholder="例: 24";
-      } else {
-        $("liabCountLabel").textContent="回数（空欄なら無期限に繰り返す）";
-        $("liabCount").placeholder="空欄でOK（終わりが決まっていれば入力）";
-      }
+      $("liabBalanceField").style.display = liabAddType==="installment" ? "" : "none";
+      $("liabRecurringFields").style.display = liabAddType==="installment" ? "none" : "";
     };
   });
   $("eType").querySelectorAll("button").forEach(b=>{
@@ -711,20 +712,6 @@ function monthlyOccurrenceDate(startDate, n){
   dt.setDate(Math.min(d, lastDay));
   return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");
 }
-function installmentRemainingCount(li, today){
-  let elapsed=0;
-  for(let n=0;n<li.totalCount;n++){
-    if(monthlyOccurrenceDate(li.startDate,n) <= today) elapsed++; else break;
-  }
-  return Math.max(0, li.totalCount - elapsed);
-}
-function extraPaidTotal(li, today){
-  return (li.extraPayments||[]).filter(p=>p.date<=today).reduce((s,p)=>s+p.amount,0);
-}
-function installmentRemainingBalance(li, today){
-  const scheduledRemaining = installmentRemainingCount(li, today) * li.amount;
-  return Math.max(0, scheduledRemaining - extraPaidTotal(li, today));
-}
 function recurringNextOccurrence(li, today){
   // 回数（totalCount）を設定していれば、満了後は null（そのシリーズは終了）
   let n=0, d=monthlyOccurrenceDate(li.startDate,0);
@@ -740,7 +727,7 @@ function liabilitySummary(){
   let installmentRemain=0, recurringNext=0;
   liabilities.forEach(li=>{
     if(li.type==="installment"){
-      installmentRemain += installmentRemainingBalance(li, today);
+      installmentRemain += (li.balance||0);
     } else {
       if(recurringNextOccurrence(li, today)) recurringNext += li.amount;
     }
@@ -942,61 +929,58 @@ function renderLiabList(){
   const el=$("liabList"); el.innerHTML="";
   if(liabilities.length===0){ el.innerHTML='<div class="muted" style="padding:6px 0">登録なし</div>'; return; }
   const today=todayStr();
-  liabilities.slice().sort((a,b)=> a.startDate<b.startDate?-1:1).forEach(li=>{
+  liabilities.slice().sort((a,b)=>{
+    if(a.type!==b.type) return a.type==="installment"?-1:1;
+    return a.name<b.name?-1:1;
+  }).forEach(li=>{
     const row=document.createElement("div"); row.className="catedit";
-    let info;
     if(li.type==="installment"){
-      const balance=installmentRemainingBalance(li, today);
-      const extra=extraPaidTotal(li, today);
-      info = `残高${yen(balance)}`+(extra>0?`（うち繰上返済累計${yen(extra)}）`:"");
+      row.innerHTML = `<span class="nm">${esc(li.name)}<span class="pill">分割</span><br><span class="muted">${esc(li.category)}・未払金</span></span>`;
+      const balInput=document.createElement("input");
+      balInput.type="number"; balInput.inputMode="numeric"; balInput.value=li.balance;
+      balInput.style.cssText="width:110px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);text-align:right;margin-right:4px";
+      balInput.onchange=()=>{
+        const v=Math.max(0, Math.round(Number(balInput.value))||0);
+        const updated=JSON.parse(JSON.stringify(li)); updated.balance=v;
+        saveLiability(updated);
+        toast("未払金を更新しました");
+      };
+      const delBtn=document.createElement("button"); delBtn.title="削除"; delBtn.textContent="×";
+      delBtn.onclick=()=>{ deleteLiability(li.id); };
+      row.appendChild(balInput); row.appendChild(delBtn);
     } else {
       const occ=recurringNextOccurrence(li, today);
+      let info;
       if(!occ) info = "終了（設定回数を満了）";
       else info = li.totalCount ? `次回${occ.date}・残り${li.totalCount-occ.index}/${li.totalCount}回・${yen(li.amount)}` : `次回${occ.date}・${yen(li.amount)}`;
+      row.innerHTML = `<span class="nm">${esc(li.name)}<span class="pill">定期</span><br><span class="muted">${esc(li.category)}・${info}</span></span><button title="削除">×</button>`;
+      row.querySelector("button").onclick=()=>{ deleteLiability(li.id); };
     }
-    row.innerHTML = `<span class="nm">${esc(li.name)}<span class="pill">${li.type==="installment"?"分割":"定期"}</span><br><span class="muted">${esc(li.category)}・${info}</span></span><button title="削除">×</button>`;
-    row.querySelector("button").onclick=()=>{ deleteLiability(li.id); };
     el.appendChild(row);
-    if(li.type==="installment"){
-      const exRow=document.createElement("div");
-      exRow.style.cssText="display:flex;gap:6px;padding:0 0 12px;align-items:center";
-      exRow.innerHTML=`<input type="number" inputmode="numeric" placeholder="繰上返済額" style="flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)">
-        <input type="date" value="${today}" style="padding:8px 6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)">
-        <button style="border:none;background:var(--accent);color:#fff;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer;white-space:nowrap;flex:none">繰上返済</button>`;
-      const inputs=exRow.querySelectorAll("input"), amtInput=inputs[0], dateInput=inputs[1], btn=exRow.querySelector("button");
-      btn.onclick=()=>{
-        const amt=Math.round(Number(amtInput.value));
-        if(!amt||amt<=0){ toast("金額を入れてください"); return; }
-        const updated=JSON.parse(JSON.stringify(li));
-        updated.extraPayments=updated.extraPayments||[];
-        updated.extraPayments.push({date:dateInput.value||today, amount:amt});
-        saveLiability(updated);
-        toast("繰上返済を記録しました");
-      };
-      el.appendChild(exRow);
-    }
   });
 }
 function addLiability(){
   if(!uid){ toast("ログインしてください"); return; }
   const name=$("liabName").value.trim();
-  const amount=Math.round(Number($("liabAmount").value));
-  const startDate=$("liabStart").value || todayStr();
   const category=$("liabCategory").value;
   const method=$("liabMethod").value;
   if(!name){ toast("名称を入れてください"); return; }
-  if(!amount || amount<=0){ toast("金額を入れてください"); return; }
-  const li = { id:uid6(), type:liabAddType, name, category, method, amount, startDate };
-  const count=Math.round(Number($("liabCount").value));
   if(liabAddType==="installment"){
-    if(!count || count<=0){ toast("回数を入れてください"); return; }
-    li.totalCount=count;
-  } else if(count>0){
-    li.totalCount=count; // 空欄・0なら無期限
+    const balance=Math.round(Number($("liabBalance").value));
+    if(!balance || balance<=0){ toast("未払金を入れてください"); return; }
+    saveLiability({ id:uid6(), type:"installment", name, category, method, balance });
+    $("liabName").value=""; $("liabBalance").value="";
+  } else {
+    const amount=Math.round(Number($("liabAmount").value));
+    const startDate=$("liabStart").value || todayStr();
+    if(!amount || amount<=0){ toast("金額を入れてください"); return; }
+    const li = { id:uid6(), type:"recurring", name, category, method, amount, startDate };
+    const count=Math.round(Number($("liabCount").value));
+    if(count>0) li.totalCount=count; // 空欄・0なら無期限
+    saveLiability(li);
+    $("liabName").value=""; $("liabAmount").value=""; $("liabCount").value="";
   }
-  saveLiability(li);
-  $("liabName").value=""; $("liabAmount").value=""; $("liabCount").value="";
-  toast("追加しました");
+  toast("登録しました");
 }
 function recalcOpening(){
   const c=Number($("opCash").value)||0, b=Number($("opBank").value)||0, k=Number($("opCard").value)||0;
