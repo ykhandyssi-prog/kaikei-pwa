@@ -376,6 +376,7 @@
       <button class="del" id="eDelete">削除</button>
       <button class="save" id="eSave">保存</button>
     </div>
+    <button class="btn" id="eDuplicate" style="width:100%;margin-top:10px">複製して新規入力</button>
     <button class="btn" id="eCancel" style="width:100%;margin-top:10px">キャンセル</button>
   </div>
 </div>
@@ -584,6 +585,7 @@ function bindUI(){
   });
   $("eSave").onclick=saveEdit;
   $("eDelete").onclick=onDeleteEdit;
+  $("eDuplicate").onclick=duplicateToInput;
   $("eCancel").onclick=closeEdit;
   $("editBg").onclick=e=>{ if(e.target.id==="editBg") closeEdit(); };
 }
@@ -681,6 +683,26 @@ function saveEdit(){
   r.unpaid = editType==="expense" && $("eUnpaid").checked;
   saveRecord(r);
   closeEdit(); renderList(); toast("更新しました");
+}
+function duplicateToInput(){
+  const type=editType;
+  const amount=$("eAmount").value;
+  const category=$("eCategory").value;
+  const method=$("eMethod").value;
+  const memo=$("eMemo").value;
+  const tags=$("eTags").value;
+  const unpaid=$("eUnpaid").checked;
+  closeEdit();
+  document.querySelector('#tabs button[data-view="v-input"]').click();
+  document.querySelector(`#typeToggle button[data-type="${type}"]`).click();
+  $("amount").value=amount;
+  $("category").value=category; refreshCatStyle();
+  $("method").value=method;
+  $("date").value=todayStr();
+  $("memo").value=memo;
+  $("tags").value=tags;
+  if(type==="expense") $("unpaidCheck").checked=unpaid;
+  toast("複製しました。内容を確認して保存してください");
 }
 function onDeleteEdit(){
   const b=$("eDelete");
