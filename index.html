@@ -45,6 +45,7 @@
     font-weight:700; color:var(--sub); cursor:pointer; }
   .toggle button.on.expense{ background:var(--expense); color:#fff; }
   .toggle button.on.income{ background:var(--income); color:#fff; }
+  .toggle button.on.plain{ background:var(--accent); color:#fff; }
   .save{ width:100%; border:none; background:var(--accent); color:#fff; font-weight:700;
     padding:14px; border-radius:12px; font-size:16px; cursor:pointer; margin-top:2px; }
   .save:active{ opacity:.85; }
@@ -203,6 +204,14 @@
     <div class="k" id="balLabel">推定残高</div>
     <div class="v" id="balValue">¥0</div>
   </div>
+  <div class="card">
+    <h3 class="sec">負債・予定支払いを踏まえた残高</h3>
+    <div class="row">
+      <div class="stat"><div class="k">分割払い控除後</div><div class="v" id="balStep2">¥0</div></div>
+      <div class="stat"><div class="k">定期支払いも控除後</div><div class="v" id="balStep3">¥0</div></div>
+    </div>
+    <p class="muted" style="margin:10px 0 0">上の残高＝実際の現金・口座等の残高。①分割払い控除後＝そこから分割払い残高（支払いが確定している分）を引いた額。②定期支払いも控除後＝①からさらに次回定期支払い（クレカ引き落とし・信用情報にも関わるので来月分として意識。ただし解約すればいつでも止められるので次回1回分だけ）を引いた額。</p>
+  </div>
   <div class="monthnav">
     <button id="stPrev">‹</button>
     <span class="m" id="stMonth"></span>
@@ -271,6 +280,28 @@
     </div>
     <p class="muted">全データをJSONで保存／復元（取り込みはIDで重複を避けて統合）。端末移行や保険用。</p>
     <input type="file" id="impFile" accept="application/json" style="display:none" />
+  </div>
+  <div class="card">
+    <h3 class="sec">負債・定期支払い</h3>
+    <div id="liabList"></div>
+    <div class="field">
+      <div class="toggle" id="liabTypeToggle">
+        <button type="button" class="plain on" data-type="installment">分割払い</button>
+        <button type="button" class="plain" data-type="recurring">定期支払い</button>
+      </div>
+    </div>
+    <div class="field"><label>名称</label><input id="liabName" type="text" placeholder="例: PC分割払い" /></div>
+    <div class="row">
+      <div class="field"><label>カテゴリ</label><select id="liabCategory"></select></div>
+      <div class="field"><label>支払手段</label><select id="liabMethod"></select></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>1回あたりの金額</label><input id="liabAmount" type="number" inputmode="numeric" placeholder="0" /></div>
+      <div class="field"><label>開始日（初回の支払日）</label><input id="liabStart" type="date" /></div>
+    </div>
+    <div class="field" id="liabCountField"><label id="liabCountLabel">回数（全〇回・必須）</label><input id="liabCount" type="number" inputmode="numeric" placeholder="例: 24" /></div>
+    <button class="save" id="liabAdd">追加</button>
+    <p class="muted">分割払い＝支払い終了の回数が決まっているもの（残り全回数分を残高から差し引く・回数は必須）。定期支払い＝サブスクなど（クレカ引き落とし・信用情報にも関わるため次回1回分を残高から差し引く。ただし解約すればいつでも止められるので、全期間分は見込まない）。回数は任意で、終わりが決まっていれば入力（満了後は「終了」扱いになり残高計算から外れる）、空欄なら無期限として扱う。毎月同じ日に支払う想定。</p>
   </div>
   <div class="card">
     <h3 class="sec">Vault連携</h3>
@@ -379,6 +410,7 @@ const DEFAULTS = {
 
 /* ---------- 状態 ---------- */
 let records = [];      // {id,date,type,amount,category,method,memo,tags:[]}
+let liabilities = [];  // {id,type:"installment"|"recurring",name,category,method,amount,startDate,totalCount?}
 let settings = JSON.parse(JSON.stringify(DEFAULTS));
 let listMonth = ym(new Date());
 let stMonth = ym(new Date());
@@ -387,9 +419,10 @@ let trendGran = "month";
 let curType = "expense";
 let editingId = null;
 let editType = "expense";
+let liabAddType = "installment";
 let delArmTimer = null;
 let uid = null;
-let unsubRecords = null, unsubSettings = null;
+let unsubRecords = null, unsubSettings = null, unsubLiabilities = null;
 
 /* ---------- ユーティリティ ---------- */
 function ym(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
@@ -405,9 +438,12 @@ const PALETTE = ["#2563eb","#dc2626","#059669","#d97706","#7c3aed","#db2777","#0
 
 /* ---------- Firestore データ操作 ---------- */
 function recRef(id){ return doc(db, "users", uid, "records", id); }
+function liabRef(id){ return doc(db, "users", uid, "liabilities", id); }
 function settingsRef(){ return doc(db, "users", uid, "meta", "settings"); }
 function saveRecord(rec){ setDoc(recRef(rec.id), rec).catch(()=>toast("保存に失敗（オフライン時は復帰後に同期）")); }
 function deleteRecord(id){ deleteDoc(recRef(id)).catch(()=>toast("削除に失敗（復帰後に同期）")); }
+function saveLiability(li){ setDoc(liabRef(li.id), li).catch(()=>toast("保存に失敗（オフライン時は復帰後に同期）")); }
+function deleteLiability(id){ deleteDoc(liabRef(id)).catch(()=>toast("削除に失敗（復帰後に同期）")); }
 function saveSettings(){ if(uid) setDoc(settingsRef(), settings).catch(()=>{}); return Promise.resolve(); }
 function normalizeSettings(d){
   return {
@@ -445,8 +481,17 @@ function startSync(){
     records = snap.docs.map(d=>d.data());
     refreshActiveView();
   }, err=>console.error("records sync", err));
+  unsubLiabilities = onSnapshot(collection(db, "users", uid, "liabilities"), snap=>{
+    liabilities = snap.docs.map(d=>d.data());
+    refreshActiveView();
+  }, err=>console.error("liabilities sync", err));
 }
-function stopSync(){ if(unsubRecords){ unsubRecords(); unsubRecords=null; } if(unsubSettings){ unsubSettings(); unsubSettings=null; } records=[]; }
+function stopSync(){
+  if(unsubRecords){ unsubRecords(); unsubRecords=null; }
+  if(unsubSettings){ unsubSettings(); unsubSettings=null; }
+  if(unsubLiabilities){ unsubLiabilities(); unsubLiabilities=null; }
+  records=[]; liabilities=[];
+}
 function refreshActiveView(){
   const v = document.querySelector(".view.active") && document.querySelector(".view.active").id;
   if(v==="v-list") renderList();
@@ -505,6 +550,20 @@ function bindUI(){
   document.querySelectorAll(".addcat button").forEach(b=>{ b.onclick=()=>addCat(b.dataset.type); });
   ["opCash","opBank","opCard"].forEach(id=> $(id).addEventListener("input", recalcOpening));
   $("opSave").onclick=saveOpening;
+  $("liabTypeToggle").querySelectorAll("button").forEach(b=>{
+    b.onclick=()=>{
+      liabAddType=b.dataset.type;
+      $("liabTypeToggle").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
+      if(liabAddType==="installment"){
+        $("liabCountLabel").textContent="回数（全〇回・必須）";
+        $("liabCount").placeholder="例: 24";
+      } else {
+        $("liabCountLabel").textContent="回数（空欄なら無期限に繰り返す）";
+        $("liabCount").placeholder="空欄でOK（終わりが決まっていれば入力）";
+      }
+    };
+  });
+  $("liabAdd").onclick=addLiability;
   $("eType").querySelectorAll("button").forEach(b=>{
     b.onclick=()=>{ setEditTypeUI(b.dataset.type); buildEditSelects(b.dataset.type, null, $("eMethod").value); };
   });
@@ -628,12 +687,56 @@ function currentBalance(){
   recs.forEach(r=> bal += r.type==="income"?r.amount:-r.amount);
   return { label: hasOp?"現在の推定残高":"現在の残高", value: bal };
 }
+/* ---------- 負債・定期支払い（毎月同日払いを想定） ---------- */
+function monthlyOccurrenceDate(startDate, n){
+  const [y,m,d] = startDate.split("-").map(Number);
+  const dt = new Date(y, m-1+n, 1);
+  const lastDay = new Date(dt.getFullYear(), dt.getMonth()+1, 0).getDate();
+  dt.setDate(Math.min(d, lastDay));
+  return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");
+}
+function installmentRemainingCount(li, today){
+  let elapsed=0;
+  for(let n=0;n<li.totalCount;n++){
+    if(monthlyOccurrenceDate(li.startDate,n) <= today) elapsed++; else break;
+  }
+  return Math.max(0, li.totalCount - elapsed);
+}
+function recurringNextOccurrence(li, today){
+  // 回数（totalCount）を設定していれば、満了後は null（そのシリーズは終了）
+  let n=0, d=monthlyOccurrenceDate(li.startDate,0);
+  while(d < today){
+    n++;
+    if(li.totalCount && n>=li.totalCount) return null;
+    d=monthlyOccurrenceDate(li.startDate,n);
+  }
+  return { date:d, index:n };
+}
+function liabilitySummary(){
+  const today=todayStr();
+  let installmentRemain=0, recurringNext=0;
+  liabilities.forEach(li=>{
+    if(li.type==="installment"){
+      installmentRemain += installmentRemainingCount(li, today) * li.amount;
+    } else {
+      if(recurringNextOccurrence(li, today)) recurringNext += li.amount;
+    }
+  });
+  return { installmentRemain, recurringNext };
+}
 function renderStats(){
   $("stMonth").textContent = monthLabel(stMonth);
   const cb=currentBalance();
   $("balLabel").textContent=cb.label;
   $("balValue").textContent=yen(cb.value);
   $("balValue").style.color = cb.value<0 ? "var(--expense)" : "var(--ink)";
+  const ls=liabilitySummary();
+  const step2 = cb.value - ls.installmentRemain;
+  const step3 = step2 - ls.recurringNext;
+  $("balStep2").textContent=yen(step2);
+  $("balStep2").style.color = step2<0 ? "var(--expense)" : "var(--ink)";
+  $("balStep3").textContent=yen(step3);
+  $("balStep3").style.color = step3<0 ? "var(--expense)" : "var(--ink)";
   const recs = recOfMonth(stMonth);
   let inc=0,exp=0;
   recs.forEach(r=>{ if(r.type==="income") inc+=r.amount; else exp+=r.amount; });
@@ -801,6 +904,57 @@ function renderSettings(){
   renderCatList("expense","catExpense");
   renderCatList("income","catIncome");
   renderMethodList();
+  buildLiabSelects();
+  renderLiabList();
+}
+function buildLiabSelects(){
+  const cat=$("liabCategory"); const prevCat=cat.value; cat.innerHTML="";
+  settings.categories.expense.forEach(c=>{ const o=document.createElement("option"); o.value=c; o.textContent=c; cat.appendChild(o); });
+  if(prevCat && settings.categories.expense.includes(prevCat)) cat.value=prevCat;
+  const me=$("liabMethod"); const prevM=me.value; me.innerHTML="";
+  settings.methods.forEach(m=>{ const o=document.createElement("option"); o.value=m; o.textContent=m; me.appendChild(o); });
+  if(prevM && settings.methods.includes(prevM)) me.value=prevM;
+}
+function renderLiabList(){
+  const el=$("liabList"); el.innerHTML="";
+  if(liabilities.length===0){ el.innerHTML='<div class="muted" style="padding:6px 0">登録なし</div>'; return; }
+  const today=todayStr();
+  liabilities.slice().sort((a,b)=> a.startDate<b.startDate?-1:1).forEach(li=>{
+    const row=document.createElement("div"); row.className="catedit";
+    let info;
+    if(li.type==="installment"){
+      const remain=installmentRemainingCount(li, today);
+      info = `残り${remain}/${li.totalCount}回・残高${yen(remain*li.amount)}`;
+    } else {
+      const occ=recurringNextOccurrence(li, today);
+      if(!occ) info = "終了（設定回数を満了）";
+      else info = li.totalCount ? `次回${occ.date}・残り${li.totalCount-occ.index}/${li.totalCount}回・${yen(li.amount)}` : `次回${occ.date}・${yen(li.amount)}`;
+    }
+    row.innerHTML = `<span class="nm">${esc(li.name)}<span class="pill">${li.type==="installment"?"分割":"定期"}</span><br><span class="muted">${esc(li.category)}・${info}</span></span><button title="削除">×</button>`;
+    row.querySelector("button").onclick=()=>{ deleteLiability(li.id); };
+    el.appendChild(row);
+  });
+}
+function addLiability(){
+  if(!uid){ toast("ログインしてください"); return; }
+  const name=$("liabName").value.trim();
+  const amount=Math.round(Number($("liabAmount").value));
+  const startDate=$("liabStart").value || todayStr();
+  const category=$("liabCategory").value;
+  const method=$("liabMethod").value;
+  if(!name){ toast("名称を入れてください"); return; }
+  if(!amount || amount<=0){ toast("金額を入れてください"); return; }
+  const li = { id:uid6(), type:liabAddType, name, category, method, amount, startDate };
+  const count=Math.round(Number($("liabCount").value));
+  if(liabAddType==="installment"){
+    if(!count || count<=0){ toast("回数を入れてください"); return; }
+    li.totalCount=count;
+  } else if(count>0){
+    li.totalCount=count; // 空欄・0なら無期限
+  }
+  saveLiability(li);
+  $("liabName").value=""; $("liabAmount").value=""; $("liabCount").value="";
+  toast("追加しました");
 }
 function recalcOpening(){
   const c=Number($("opCash").value)||0, b=Number($("opBank").value)||0, k=Number($("opCard").value)||0;
@@ -850,7 +1004,7 @@ function download(name,text,mime){
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function exportJson(){
-  const data={ version:2, exportedAt:new Date().toISOString(), settings, records };
+  const data={ version:3, exportedAt:new Date().toISOString(), settings, records, liabilities };
   download(`kakei-${todayStr()}.json`, JSON.stringify(data,null,2), "application/json");
   toast("書き出しました");
 }
@@ -862,6 +1016,8 @@ async function importJson(e){
     if(data.settings){ settings = normalizeSettings(data.settings); saveSettings(); }
     const list = data.records||[];
     for(const r of list){ if(r && r.id) saveRecord(r); }
+    const liabs = data.liabilities||[];
+    for(const li of liabs){ if(li && li.id) saveLiability(li); }
     buildSelects();
     toast(`${list.length}件を取り込みました`);
   }catch(err){ toast("取り込みに失敗しました"); }
