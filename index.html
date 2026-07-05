@@ -236,6 +236,14 @@
     </div>
     <p class="muted" style="margin:10px 0 0">上の残高＝実際の現金・口座等の残高（未払金にした支出は、実際に払って編集画面でチェックを外すまでここには反映されない）。①未払金控除後＝そこから未払金の合計を引いた額。②定期支払いも控除後＝①からさらに次回定期支払い（クレカ引き落とし・信用情報にも関わるので来月分として意識。ただし解約すればいつでも止められるので次回1回分だけ）を引いた額。</p>
   </div>
+  <div class="card">
+    <h3 class="sec">定期支払いの準備額</h3>
+    <div class="row">
+      <div class="stat"><div class="k" id="upcomingThisLabel">今月</div><div class="v" id="upcomingThis">¥0</div></div>
+      <div class="stat"><div class="k" id="upcomingNextLabel">来月</div><div class="v" id="upcomingNext">¥0</div></div>
+    </div>
+    <p class="muted" style="margin:10px 0 0">その月に発生が確定している定期支払い（サブスク等）の合計。常に実際の今日基準（月ナビの表示月とは連動しない）。</p>
+  </div>
   <div class="monthnav">
     <button id="stPrev">‹</button>
     <span class="m" id="stMonth"></span>
@@ -308,7 +316,7 @@
   <div class="card">
     <h3 class="sec">定期支払い（登録一覧）</h3>
     <div id="liabList"></div>
-    <p class="muted">追加は「入力」タブの「定期支払い」トグルから。ここでは一覧確認と削除のみ。</p>
+    <p class="muted">追加は「入力」タブの「定期支払い」トグルから。実際に引き落とされたら「支払済」で支出欄に転記して保存（この一覧のスケジュール自体は変わらない）。</p>
   </div>
   <div class="card">
     <h3 class="sec">Vault連携</h3>
@@ -684,6 +692,17 @@ function saveEdit(){
   saveRecord(r);
   closeEdit(); renderList(); toast("更新しました");
 }
+function prefillInput({type, amount, category, method, memo, tags, unpaid}){
+  document.querySelector('#tabs button[data-view="v-input"]').click();
+  document.querySelector(`#typeToggle button[data-type="${type}"]`).click();
+  $("amount").value = amount!=null ? amount : "";
+  $("category").value = category||""; refreshCatStyle();
+  if(method) $("method").value=method;
+  $("date").value=todayStr();
+  $("memo").value=memo||"";
+  $("tags").value=tags||"";
+  if(type==="expense") $("unpaidCheck").checked=!!unpaid;
+}
 function duplicateToInput(){
   const type=editType;
   const amount=$("eAmount").value;
@@ -693,16 +712,12 @@ function duplicateToInput(){
   const tags=$("eTags").value;
   const unpaid=$("eUnpaid").checked;
   closeEdit();
-  document.querySelector('#tabs button[data-view="v-input"]').click();
-  document.querySelector(`#typeToggle button[data-type="${type}"]`).click();
-  $("amount").value=amount;
-  $("category").value=category; refreshCatStyle();
-  $("method").value=method;
-  $("date").value=todayStr();
-  $("memo").value=memo;
-  $("tags").value=tags;
-  if(type==="expense") $("unpaidCheck").checked=unpaid;
+  prefillInput({type, amount, category, method, memo, tags, unpaid});
   toast("複製しました。内容を確認して保存してください");
+}
+function markLiabilityPaid(li){
+  prefillInput({type:"expense", amount:li.amount, category:li.category, method:li.method, memo:li.name});
+  toast("支出欄に転記しました。内容を確認して保存してください");
 }
 function onDeleteEdit(){
   const b=$("eDelete");
@@ -761,6 +776,20 @@ function recurringNextTotal(){
   liabilities.forEach(li=>{ if(li.type==="recurring" && recurringNextOccurrence(li, today)) total+=li.amount; });
   return total;
 }
+function monthHasOccurrence(li, ymStr){
+  // liの毎月払いが対象月(ymStr)に発生するか。発生するならその金額、しないなら0
+  const [ly,lm] = li.startDate.split("-").map(Number);
+  const [ty,tm] = ymStr.split("-").map(Number);
+  const n = (ty-ly)*12 + (tm-lm);
+  if(n<0) return 0; // まだ始まっていない
+  if(li.totalCount && n>=li.totalCount) return 0; // 既に満了
+  return li.amount;
+}
+function upcomingRecurringTotal(ymStr){
+  let total=0;
+  liabilities.forEach(li=>{ if(li.type==="recurring") total += monthHasOccurrence(li, ymStr); });
+  return total;
+}
 function renderStats(){
   $("stMonth").textContent = monthLabel(stMonth);
   const cb=currentBalance();
@@ -773,6 +802,11 @@ function renderStats(){
   $("balStep2").style.color = step2<0 ? "var(--expense)" : "var(--ink)";
   $("balStep3").textContent=yen(step3);
   $("balStep3").style.color = step3<0 ? "var(--expense)" : "var(--ink)";
+  const thisYm=ym(new Date()), nextYm=shiftMonth(thisYm,1);
+  $("upcomingThisLabel").textContent = monthLabel(thisYm);
+  $("upcomingNextLabel").textContent = monthLabel(nextYm);
+  $("upcomingThis").textContent = yen(upcomingRecurringTotal(thisYm));
+  $("upcomingNext").textContent = yen(upcomingRecurringTotal(nextYm));
   const recs = recOfMonth(stMonth);
   let inc=0,exp=0;
   recs.forEach(r=>{ if(r.type==="income") inc+=r.amount; else exp+=r.amount; });
@@ -965,8 +999,14 @@ function renderLiabList(){
     let info;
     if(!occ) info = "終了（設定回数を満了）";
     else info = li.totalCount ? `次回${occ.date}・残り${li.totalCount-occ.index}/${li.totalCount}回・${yen(li.amount)}` : `次回${occ.date}・${yen(li.amount)}`;
-    row.innerHTML = `<span class="nm">${esc(li.name)}<span class="pill">定期</span><br><span class="muted">${esc(li.category)}・${info}</span></span><button title="削除">×</button>`;
-    row.querySelector("button").onclick=()=>{ deleteLiability(li.id); };
+    row.innerHTML = `<span class="nm">${esc(li.name)}<span class="pill">定期</span><br><span class="muted">${esc(li.category)}・${info}</span></span>`;
+    const payBtn=document.createElement("button"); payBtn.textContent="支払済";
+    payBtn.title="支出欄に転記する";
+    payBtn.style.cssText="border:none;background:transparent;color:var(--accent);cursor:pointer;font-size:13px;font-weight:700;white-space:nowrap;margin-right:2px";
+    payBtn.onclick=()=>markLiabilityPaid(li);
+    const delBtn=document.createElement("button"); delBtn.title="削除"; delBtn.textContent="×";
+    delBtn.onclick=()=>{ deleteLiability(li.id); };
+    row.appendChild(payBtn); row.appendChild(delBtn);
     el.appendChild(row);
   });
 }
