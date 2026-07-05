@@ -156,33 +156,55 @@
       <div class="toggle" id="typeToggle">
         <button type="button" class="expense on" data-type="expense">支出</button>
         <button type="button" class="income" data-type="income">収入</button>
+        <button type="button" class="plain" data-type="liability">予定支払い</button>
       </div>
     </div>
-    <div class="field amount">
-      <label>金額</label>
-      <input id="amount" type="number" inputmode="numeric" placeholder="0" min="0" step="1" />
-    </div>
-    <div class="field">
-      <label>カテゴリ</label>
-      <select id="category"></select>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label>支払手段</label>
-        <select id="method"></select>
+    <div id="normalFields">
+      <div class="field amount">
+        <label>金額</label>
+        <input id="amount" type="number" inputmode="numeric" placeholder="0" min="0" step="1" />
       </div>
       <div class="field">
-        <label>日付</label>
-        <input id="date" type="date" />
+        <label>カテゴリ</label>
+        <select id="category"></select>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>支払手段</label>
+          <select id="method"></select>
+        </div>
+        <div class="field">
+          <label>日付</label>
+          <input id="date" type="date" />
+        </div>
+      </div>
+      <div class="field">
+        <label>メモ</label>
+        <textarea id="memo" placeholder="任意"></textarea>
+      </div>
+      <div class="field">
+        <label>タグ（スペース区切り、#は不要）</label>
+        <input id="tags" type="text" placeholder="例: みずにとく 文フリ" />
       </div>
     </div>
-    <div class="field">
-      <label>メモ</label>
-      <textarea id="memo" placeholder="任意"></textarea>
-    </div>
-    <div class="field">
-      <label>タグ（スペース区切り、#は不要）</label>
-      <input id="tags" type="text" placeholder="例: みずにとく 文フリ" />
+    <div id="liabFields" style="display:none">
+      <div class="field">
+        <div class="toggle" id="liabTypeToggle">
+          <button type="button" class="plain on" data-type="installment">分割払い</button>
+          <button type="button" class="plain" data-type="recurring">定期支払い</button>
+        </div>
+      </div>
+      <div class="field"><label>名称</label><input id="liabName" type="text" placeholder="例: PC分割払い" /></div>
+      <div class="row">
+        <div class="field"><label>カテゴリ</label><select id="liabCategory"></select></div>
+        <div class="field"><label>支払手段</label><select id="liabMethod"></select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>1回あたりの金額</label><input id="liabAmount" type="number" inputmode="numeric" placeholder="0" /></div>
+        <div class="field"><label>開始日（初回の支払日）</label><input id="liabStart" type="date" /></div>
+      </div>
+      <div class="field" id="liabCountField"><label id="liabCountLabel">回数（全〇回・必須）</label><input id="liabCount" type="number" inputmode="numeric" placeholder="例: 24" /></div>
+      <p class="muted">分割払い＝支払い終了の回数が決まっているもの（残り全回数分を残高から差し引く・回数は必須）。定期支払い＝サブスクなど（クレカ引き落とし・信用情報にも関わるため次回1回分を残高から差し引く。ただし解約すればいつでも止められるので、全期間分は見込まない）。回数は任意で、終わりが決まっていれば入力（満了後は「終了」扱いになり残高計算から外れる）、空欄なら無期限として扱う。毎月同じ日に支払う想定。</p>
     </div>
     <button class="save" id="saveBtn">保存する</button>
   </div>
@@ -282,26 +304,9 @@
     <input type="file" id="impFile" accept="application/json" style="display:none" />
   </div>
   <div class="card">
-    <h3 class="sec">負債・定期支払い</h3>
+    <h3 class="sec">負債・定期支払い（登録一覧）</h3>
     <div id="liabList"></div>
-    <div class="field">
-      <div class="toggle" id="liabTypeToggle">
-        <button type="button" class="plain on" data-type="installment">分割払い</button>
-        <button type="button" class="plain" data-type="recurring">定期支払い</button>
-      </div>
-    </div>
-    <div class="field"><label>名称</label><input id="liabName" type="text" placeholder="例: PC分割払い" /></div>
-    <div class="row">
-      <div class="field"><label>カテゴリ</label><select id="liabCategory"></select></div>
-      <div class="field"><label>支払手段</label><select id="liabMethod"></select></div>
-    </div>
-    <div class="row">
-      <div class="field"><label>1回あたりの金額</label><input id="liabAmount" type="number" inputmode="numeric" placeholder="0" /></div>
-      <div class="field"><label>開始日（初回の支払日）</label><input id="liabStart" type="date" /></div>
-    </div>
-    <div class="field" id="liabCountField"><label id="liabCountLabel">回数（全〇回・必須）</label><input id="liabCount" type="number" inputmode="numeric" placeholder="例: 24" /></div>
-    <button class="save" id="liabAdd">追加</button>
-    <p class="muted">分割払い＝支払い終了の回数が決まっているもの（残り全回数分を残高から差し引く・回数は必須）。定期支払い＝サブスクなど（クレカ引き落とし・信用情報にも関わるため次回1回分を残高から差し引く。ただし解約すればいつでも止められるので、全期間分は見込まない）。回数は任意で、終わりが決まっていれば入力（満了後は「終了」扱いになり残高計算から外れる）、空欄なら無期限として扱う。毎月同じ日に支払う想定。</p>
+    <p class="muted">追加は「入力」タブの「予定支払い」トグルから。ここでは一覧確認と削除のみ。</p>
   </div>
   <div class="card">
     <h3 class="sec">Vault連携</h3>
@@ -417,6 +422,7 @@ let stMonth = ym(new Date());
 let breakType = "expense";
 let trendGran = "month";
 let curType = "expense";
+let inputMode = "record"; // "record" | "liability"
 let editingId = null;
 let editType = "expense";
 let liabAddType = "installment";
@@ -475,7 +481,7 @@ function startSync(){
   unsubSettings = onSnapshot(settingsRef(), snap=>{
     if(snap.exists()){ settings = normalizeSettings(snap.data()); }
     else { settings = JSON.parse(JSON.stringify(DEFAULTS)); setDoc(settingsRef(), settings).catch(()=>{}); }
-    buildSelects(); refreshActiveView();
+    buildSelects(); buildLiabSelects(); refreshActiveView();
   }, err=>console.error("settings sync", err));
   unsubRecords = onSnapshot(collection(db, "users", uid, "records"), snap=>{
     records = snap.docs.map(d=>d.data());
@@ -514,13 +520,24 @@ function refreshCatStyle(){ const c=$("category"); c.style.color = c.value ? "" 
 function bindUI(){
   $("loginBtn").onclick=doLogin;
   $("logoutBtn").onclick=()=>signOut(auth);
-  $("saveBtn").onclick=onSave;
+  $("saveBtn").onclick=()=>{ if(inputMode==="liability") addLiability(); else onSave(); };
   $("category").addEventListener("change", refreshCatStyle);
   $("typeToggle").querySelectorAll("button").forEach(b=>{
     b.onclick=()=>{
-      curType=b.dataset.type;
       $("typeToggle").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
-      buildSelects();
+      if(b.dataset.type==="liability"){
+        inputMode="liability";
+        $("normalFields").style.display="none";
+        $("liabFields").style.display="";
+        $("saveBtn").textContent="登録する";
+      } else {
+        inputMode="record";
+        curType=b.dataset.type;
+        $("normalFields").style.display="";
+        $("liabFields").style.display="none";
+        $("saveBtn").textContent="保存する";
+        buildSelects();
+      }
     };
   });
   $("tabs").querySelectorAll("button").forEach(b=>{
@@ -563,7 +580,6 @@ function bindUI(){
       }
     };
   });
-  $("liabAdd").onclick=addLiability;
   $("eType").querySelectorAll("button").forEach(b=>{
     b.onclick=()=>{ setEditTypeUI(b.dataset.type); buildEditSelects(b.dataset.type, null, $("eMethod").value); };
   });
@@ -1018,7 +1034,7 @@ async function importJson(e){
     for(const r of list){ if(r && r.id) saveRecord(r); }
     const liabs = data.liabilities||[];
     for(const li of liabs){ if(li && li.id) saveLiability(li); }
-    buildSelects();
+    buildSelects(); buildLiabSelects();
     toast(`${list.length}件を取り込みました`);
   }catch(err){ toast("取り込みに失敗しました"); }
   e.target.value="";
@@ -1042,7 +1058,9 @@ function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",
 /* ---------- 初期化 ---------- */
 function init(){
   $("date").value = todayStr();
+  $("liabStart").value = todayStr();
   buildSelects();
+  buildLiabSelects();
   bindUI();
   getRedirectResult(auth).catch(()=>{});
   onAuthStateChanged(auth, user=>{
