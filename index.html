@@ -237,12 +237,12 @@
     <p class="muted" style="margin:10px 0 0">上の残高＝実際の現金・口座等の残高（未払金にした支出は、実際に払って編集画面でチェックを外すまでここには反映されない）。①未払金控除後＝そこから未払金の合計を引いた額。②定期支払いも控除後＝①からさらに次回定期支払い（クレカ引き落とし・信用情報にも関わるので来月分として意識。ただし解約すればいつでも止められるので次回1回分だけ）を引いた額。</p>
   </div>
   <div class="card">
-    <h3 class="sec">定期支払いの準備額</h3>
+    <h3 class="sec">支払い準備額</h3>
     <div class="row">
       <div class="stat"><div class="k" id="upcomingThisLabel">今月</div><div class="v" id="upcomingThis">¥0</div></div>
       <div class="stat"><div class="k" id="upcomingNextLabel">来月</div><div class="v" id="upcomingNext">¥0</div></div>
     </div>
-    <p class="muted" style="margin:10px 0 0">その月に発生が確定している定期支払い（サブスク等）の合計。常に実際の今日基準（月ナビの表示月とは連動しない）。</p>
+    <p class="muted" style="margin:10px 0 0">その月に発生が確定している定期支払い（サブスク等）＋その月が使った日になっている未払金の合計。常に実際の今日基準（月ナビの表示月とは連動しない）。</p>
   </div>
   <div class="monthnav">
     <button id="stPrev">‹</button>
@@ -790,6 +790,10 @@ function upcomingRecurringTotal(ymStr){
   liabilities.forEach(li=>{ if(li.type==="recurring") total += monthHasOccurrence(li, ymStr); });
   return total;
 }
+function unpaidInMonth(ymStr){
+  // 使った日がymStr月の未払金記録（来月に予定している支出を先に未払で登録したもの）
+  return recOfMonth(ymStr).filter(r=>r.type==="expense" && r.unpaid).reduce((s,r)=>s+r.amount,0);
+}
 function renderStats(){
   $("stMonth").textContent = monthLabel(stMonth);
   const cb=currentBalance();
@@ -805,8 +809,8 @@ function renderStats(){
   const thisYm=ym(new Date()), nextYm=shiftMonth(thisYm,1);
   $("upcomingThisLabel").textContent = monthLabel(thisYm);
   $("upcomingNextLabel").textContent = monthLabel(nextYm);
-  $("upcomingThis").textContent = yen(upcomingRecurringTotal(thisYm));
-  $("upcomingNext").textContent = yen(upcomingRecurringTotal(nextYm));
+  $("upcomingThis").textContent = yen(upcomingRecurringTotal(thisYm) + unpaidInMonth(thisYm));
+  $("upcomingNext").textContent = yen(upcomingRecurringTotal(nextYm) + unpaidInMonth(nextYm));
   const recs = recOfMonth(stMonth);
   let inc=0,exp=0;
   recs.forEach(r=>{ if(r.type==="income") inc+=r.amount; else exp+=r.amount; });
