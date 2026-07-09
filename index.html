@@ -389,6 +389,27 @@
   </div>
 </div>
 
+<div class="sheet-bg" id="editLiabBg">
+  <div class="sheet" id="editLiabSheet">
+    <div class="sheet-handle"></div>
+    <div class="field"><label>名称</label><input id="elName" type="text" /></div>
+    <div class="row">
+      <div class="field"><label>カテゴリ</label><select id="elCategory"></select></div>
+      <div class="field"><label>支払手段</label><select id="elMethod"></select></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>1回あたりの金額</label><input id="elAmount" type="number" inputmode="numeric" min="0" step="1" /></div>
+      <div class="field"><label>開始日（初回の支払日）</label><input id="elStart" type="date" /></div>
+    </div>
+    <div class="field"><label>回数（空欄なら無期限に繰り返す）</label><input id="elCount" type="number" inputmode="numeric" placeholder="空欄でOK（終わりが決まっていれば入力）" /></div>
+    <div class="actions">
+      <button class="del" id="elDelete">削除</button>
+      <button class="save" id="elSave">保存</button>
+    </div>
+    <button class="btn" id="elCancel" style="width:100%;margin-top:10px">キャンセル</button>
+  </div>
+</div>
+
 <!-- ========== ログインゲート ========== -->
 <div class="authgate" id="authGate">
   <div class="authcard">
@@ -443,6 +464,8 @@ let inputMode = "record"; // "record" | "liability"
 let editingId = null;
 let editType = "expense";
 let delArmTimer = null;
+let editingLiabId = null;
+let delArmTimerLiab = null;
 let uid = null;
 let unsubRecords = null, unsubSettings = null, unsubLiabilities = null;
 
@@ -596,6 +619,10 @@ function bindUI(){
   $("eDuplicate").onclick=duplicateToInput;
   $("eCancel").onclick=closeEdit;
   $("editBg").onclick=e=>{ if(e.target.id==="editBg") closeEdit(); };
+  $("elSave").onclick=saveEditLiab;
+  $("elDelete").onclick=onDeleteEditLiab;
+  $("elCancel").onclick=closeEditLiab;
+  $("editLiabBg").onclick=e=>{ if(e.target.id==="editLiabBg") closeEditLiab(); };
 }
 
 /* ---------- 保存（入力） ---------- */
@@ -1003,7 +1030,8 @@ function renderLiabList(){
     let info;
     if(!occ) info = "終了（設定回数を満了）";
     else info = li.totalCount ? `次回${occ.date}・残り${li.totalCount-occ.index}/${li.totalCount}回・${yen(li.amount)}` : `次回${occ.date}・${yen(li.amount)}`;
-    row.innerHTML = `<span class="nm">${esc(li.name)}<span class="pill">定期</span><br><span class="muted">${esc(li.category)}・${info}</span></span>`;
+    row.innerHTML = `<span class="nm" style="cursor:pointer">${esc(li.name)}<span class="pill">定期</span><br><span class="muted">${esc(li.category)}・${info}</span></span>`;
+    row.querySelector(".nm").onclick=()=>openEditLiab(li);
     const payBtn=document.createElement("button"); payBtn.textContent="支払済";
     payBtn.title="支出欄に転記する";
     payBtn.style.cssText="border:none;background:transparent;color:var(--accent);cursor:pointer;font-size:13px;font-weight:700;white-space:nowrap;margin-right:2px";
@@ -1029,6 +1057,53 @@ function addLiability(){
   saveLiability(li);
   $("liabName").value=""; $("liabAmount").value=""; $("liabCount").value="";
   toast("登録しました");
+}
+function buildEditLiabSelects(selCat, selMethod){
+  const cat=$("elCategory"); cat.innerHTML="";
+  const cats = settings.categories.expense.slice();
+  if(selCat && !cats.includes(selCat)) cats.push(selCat);
+  cats.forEach(c=>{ const o=document.createElement("option"); o.value=c; o.textContent=c; if(c===selCat)o.selected=true; cat.appendChild(o); });
+  const me=$("elMethod"); me.innerHTML="";
+  const ms = settings.methods.slice();
+  if(selMethod && !ms.includes(selMethod)) ms.push(selMethod);
+  ms.forEach(m=>{ const o=document.createElement("option"); o.value=m; o.textContent=m; if(m===selMethod)o.selected=true; me.appendChild(o); });
+}
+function openEditLiab(li){
+  editingLiabId=li.id;
+  $("elName").value=li.name;
+  $("elAmount").value=li.amount;
+  $("elStart").value=li.startDate;
+  $("elCount").value=li.totalCount||"";
+  buildEditLiabSelects(li.category, li.method);
+  disarmDeleteLiab();
+  $("editLiabBg").classList.add("show");
+}
+function closeEditLiab(){ $("editLiabBg").classList.remove("show"); editingLiabId=null; disarmDeleteLiab(); }
+function disarmDeleteLiab(){ const b=$("elDelete"); b.classList.remove("arm"); b.textContent="削除"; if(delArmTimerLiab){ clearTimeout(delArmTimerLiab); delArmTimerLiab=null; } }
+function onDeleteEditLiab(){
+  const b=$("elDelete");
+  if(!b.classList.contains("arm")){
+    b.classList.add("arm"); b.textContent="もう一度押すと削除";
+    delArmTimerLiab=setTimeout(disarmDeleteLiab, 3000);
+    return;
+  }
+  deleteLiability(editingLiabId);
+  closeEditLiab();
+  toast("削除しました");
+}
+function saveEditLiab(){
+  const li=liabilities.find(x=>x.id===editingLiabId); if(!li) return closeEditLiab();
+  const name=$("elName").value.trim();
+  if(!name){ toast("名称を入れてください"); return; }
+  const amount=Math.round(Number($("elAmount").value));
+  if(!amount || amount<=0){ toast("金額を入れてください"); return; }
+  const startDate=$("elStart").value || li.startDate;
+  const updated = { id:li.id, type:"recurring", name, category:$("elCategory").value, method:$("elMethod").value, amount, startDate };
+  const count=Math.round(Number($("elCount").value));
+  if(count>0) updated.totalCount=count;
+  saveLiability(updated);
+  closeEditLiab();
+  toast("更新しました");
 }
 function recalcOpening(){
   const c=Number($("opCash").value)||0, b=Number($("opBank").value)||0, k=Number($("opCard").value)||0;
