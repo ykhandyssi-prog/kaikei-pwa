@@ -244,6 +244,33 @@
     </div>
     <p class="muted" style="margin:10px 0 0">その月に発生が確定している定期支払い（サブスク等）＋その月が使った日になっている未払金の合計。常に実際の今日基準（月ナビの表示月とは連動しない）。</p>
   </div>
+  <div class="card">
+    <h3 class="sec">引き落としとの照合</h3>
+    <div class="field">
+      <label>締め月（この月の利用分が翌月26日に引き落とされる）</label>
+      <div class="monthnav" style="margin:0">
+        <button id="rcPrev">‹</button>
+        <span class="m" id="rcMonthLabel"></span>
+        <button id="rcNext">›</button>
+      </div>
+    </div>
+    <div class="field" style="text-align:right;margin-bottom:8px">
+      引き落とし予定 <b id="rcExpect" style="font-size:18px">¥0</b>
+      <span class="muted" id="rcPayDate"></span>
+    </div>
+    <div class="row">
+      <div class="field"><label>実際の請求額</label><input id="rcBilled" type="number" inputmode="numeric" placeholder="Vpassで確認" /></div>
+      <div class="field"><label>口座残高</label><input id="rcBank" type="number" inputmode="numeric" placeholder="0" /></div>
+    </div>
+    <div class="field"><label>現金（財布の中だけ）</label><input id="rcCash" type="number" inputmode="numeric" placeholder="0" /></div>
+    <div class="row">
+      <div class="stat"><div class="k">カード差</div><div class="v" id="rcCardDiff">—</div></div>
+      <div class="stat"><div class="k">残高差</div><div class="v" id="rcBalDiff">—</div></div>
+    </div>
+    <p class="muted" id="rcNote" style="margin:10px 0 0"></p>
+    <button class="save" id="rcApply">調整を記録する</button>
+    <p class="muted" style="margin:10px 0 0">引き落とし当日の夜に実施する。カード差＝実際の請求額−引き落とし予定（記録漏れ・金額ズレの信号。ここでは記録しない）。残高差＝(口座＋現金−未引落カード)−推定残高（現金の記録漏れが出る）。±500円以内は原因を追わず調整で丸めてよい。調整はカテゴリ「照合調整」の通常の記録として1件保存される。</p>
+  </div>
   <div class="monthnav">
     <button id="stPrev">‹</button>
     <span class="m" id="stMonth"></span>
@@ -444,8 +471,8 @@ const provider = new GoogleAuthProvider();
 /* ---------- 設定の既定値 ---------- */
 const DEFAULTS = {
   categories: {
-    expense: ["食費","日用品","交通費","住居","通信","娯楽","研究・書籍","学会・部品","ソフト","みずにとく運営","詩作・同人","鑑賞","その他支出"],
-    income:  ["生協バイト","サポートバイト","仕送り","奨学金","その他収入"]
+    expense: ["食費","日用品","交通費","住居","通信","娯楽","研究・書籍","学会・部品","ソフト","みずにとく運営","詩作・同人","鑑賞","照合調整","その他支出"],
+    income:  ["生協バイト","サポートバイト","仕送り","奨学金","照合調整","その他収入"]
   },
   methods: ["現金","クレカ","電子マネー","口座引落","その他"],
   opening: { date:"", cash:0, bank:0, card:0, amount:0 }
@@ -594,6 +621,10 @@ function bindUI(){
   $("listNext").onclick=()=>{ listMonth=shiftMonth(listMonth,1); renderList(); };
   $("stPrev").onclick=()=>{ stMonth=shiftMonth(stMonth,-1); renderStats(); };
   $("stNext").onclick=()=>{ stMonth=shiftMonth(stMonth,1); renderStats(); };
+  $("rcPrev").onclick=()=>{ rcMonth=shiftMonth(rcMonth||defaultRcMonth(),-1); renderReconcile(); };
+  $("rcNext").onclick=()=>{ rcMonth=shiftMonth(rcMonth||defaultRcMonth(),1); renderReconcile(); };
+  ["rcBilled","rcBank","rcCash"].forEach(id=> $(id).addEventListener("input", renderReconcile));
+  $("rcApply").onclick=applyReconcile;
   $("breakSeg").querySelectorAll("button").forEach(b=>{
     b.onclick=()=>{ breakType=b.dataset.type; $("breakSeg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b)); renderBreakdown(); };
   });
@@ -821,6 +852,105 @@ function unpaidInMonth(ymStr){
   // 使った日がymStr月の未払金記録（来月に予定している支出を先に未払で登録したもの）
   return recOfMonth(ymStr).filter(r=>r.type==="expense" && r.unpaid).reduce((s,r)=>s+r.amount,0);
 }
+/* ---------- 引き落としとの照合 ---------- */
+/* 成り立っている等式： 推定残高 = 現金 + 口座残高 − 未引落のカード利用額
+   opening が「現金＋口座−未引落カード」なのはこの等式を保つため。
+   現金の記録漏れは残高差に即出るが、カードの記録漏れは（口座がまだ減らず、
+   未引落の見積もりも同額低いため）打ち消し合って残高差に出ない。だから
+   カード差（請求額との差）とメール突合が別途要る。詳細は
+   70_Knowledge/家計記録PWA - 構成と配信・更新.md「実残高との照合」節。 */
+let rcMonth = null;
+const RC_TOLERANCE = 500;   // 許容幅。これ以内は原因を追わず調整で丸める
+const RC_CAT = "照合調整";
+
+function dstr(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+// 締め月 ymStr（月末締め）の引き落とし日＝翌月26日。土日なら翌営業日にずらす（祝日は判定しない）
+function payDateOf(ymStr){
+  const [y,m] = ymStr.split("-").map(Number);
+  const d = new Date(y, m, 26);          // m は1起点なので Date の月インデックスとしては「翌月」
+  const w = d.getDay();
+  if(w===0) d.setDate(d.getDate()+1);    // 日 → 月
+  else if(w===6) d.setDate(d.getDate()+2); // 土 → 月
+  return dstr(d);
+}
+// 既定＝引き落としがこれから来る（または今日の）締め月
+function defaultRcMonth(){
+  let m = shiftMonth(ym(new Date()), -1);
+  if(payDateOf(m) < todayStr()) m = shiftMonth(m, 1);
+  return m;
+}
+// 締め月のクレカ利用分＝引き落とし予定額（クレカ収入＝Vポイントキャッシュバック等は相殺）
+function cardExpectOf(ymStr){
+  return recOfMonth(ymStr).filter(r=>r.method==="クレカ")
+    .reduce((s,r)=> s + (r.type==="income" ? -r.amount : r.amount), 0);
+}
+// 締め月 ymStr の引き落としが済んだ時点で、まだ引き落とされていないカード利用額
+// ＝翌月1日〜今日の分。未払金フラグ付きは推定残高からも除かれているのでここでも除く
+function outstandingCard(ymStr){
+  const from = shiftMonth(ymStr,1)+"-01", to = todayStr();
+  return records.filter(r=> r.method==="クレカ" && r.date>=from && r.date<=to)
+    .reduce((s,r)=> s + (r.type==="income" ? -r.amount : (r.unpaid ? 0 : r.amount)), 0);
+}
+function rcNums(){
+  const billed = $("rcBilled").value==="" ? null : Math.round(Number($("rcBilled").value));
+  const bank   = $("rcBank").value===""   ? null : Math.round(Number($("rcBank").value));
+  const cash   = $("rcCash").value===""   ? null : Math.round(Number($("rcCash").value));
+  const expect = cardExpectOf(rcMonth);
+  const cardDiff = billed===null ? null : billed - expect;
+  const balDiff  = (bank===null || cash===null) ? null
+    : (bank + cash - outstandingCard(rcMonth)) - currentBalance().value;
+  return { billed, bank, cash, expect, cardDiff, balDiff };
+}
+function renderReconcile(){
+  if(!rcMonth) rcMonth = defaultRcMonth();
+  const pay = payDateOf(rcMonth);
+  $("rcMonthLabel").textContent = monthLabel(rcMonth) + "分";
+  const n = rcNums();
+  $("rcExpect").textContent = yen(n.expect);
+  const [py,pm,pd] = pay.split("-").map(Number);
+  const wd = "日月火水木金土"[new Date(py,pm-1,pd).getDay()];
+  $("rcPayDate").textContent = ` 引落 ${pm}/${pd}(${wd})`;
+
+  const cd=$("rcCardDiff"), bd=$("rcBalDiff");
+  if(n.cardDiff===null){ cd.textContent="—"; cd.style.color="var(--sub)"; }
+  else { cd.textContent=(n.cardDiff>=0?"+":"")+yen(n.cardDiff); cd.style.color = n.cardDiff===0 ? "var(--ink)" : "var(--expense)"; }
+  if(n.balDiff===null){ bd.textContent="—"; bd.style.color="var(--sub)"; }
+  else { bd.textContent=(n.balDiff>=0?"+":"")+yen(n.balDiff); bd.style.color = Math.abs(n.balDiff)<=RC_TOLERANCE ? "var(--ink)" : "var(--expense)"; }
+
+  const msg=[];
+  if(todayStr()!==pay) msg.push(`※ 残高差が正確なのは引き落とし当日（${pm}/${pd}）の夜だけ。他の日は未引落カード額が確定しないため参考値。`);
+  if(n.cardDiff!==null && n.cardDiff!==0) msg.push(n.cardDiff>0
+    ? `カードが請求の方が ${yen(n.cardDiff)} 多い＝記録漏れの可能性（メール突合で明細を確認）。`
+    : `カードが記録の方が ${yen(-n.cardDiff)} 多い＝二重記録・金額ズレの可能性。`);
+  if(n.balDiff!==null){
+    if(Math.abs(n.balDiff)<=RC_TOLERANCE) msg.push(`残高差は許容幅（±${RC_TOLERANCE}円）以内。原因は追わず調整で丸めてよい。`);
+    else msg.push(n.balDiff<0
+      ? `実際の方が ${yen(-n.balDiff)} 少ない＝支出の記録漏れ（現金払いが有力）。`
+      : `実際の方が ${yen(n.balDiff)} 多い＝収入の記録漏れ、または支出の二重記録。`);
+  }
+  $("rcNote").textContent = msg.join(" ");
+  $("rcApply").disabled = (n.balDiff===null || n.balDiff===0);
+}
+function ensureCat(type, name){
+  if(!settings.categories[type].includes(name)){ settings.categories[type].push(name); saveSettings(); }
+}
+function applyReconcile(){
+  if(!uid){ toast("ログインしてください"); return; }
+  const n = rcNums();
+  if(n.balDiff===null){ toast("口座残高と現金を入れてください"); return; }
+  if(n.balDiff===0){ toast("ズレはありません"); return; }
+  const type = n.balDiff>0 ? "income" : "expense";
+  ensureCat(type, RC_CAT);
+  const parts = [`照合 ${todayStr()}`, `${monthLabel(rcMonth)}分`,
+    n.billed===null ? "請求—" : `請求${n.billed.toLocaleString("ja-JP")}`,
+    `口座${n.bank.toLocaleString("ja-JP")}`, `現金${n.cash.toLocaleString("ja-JP")}`];
+  if(n.cardDiff!==null) parts.push(`予定との差${n.cardDiff>=0?"+":""}${n.cardDiff.toLocaleString("ja-JP")}`);
+  saveRecord({ id:uid6(), date:todayStr(), type, amount:Math.abs(n.balDiff),
+    category:RC_CAT, method:"その他", memo:parts.join(" / "), tags:[] });
+  ["rcBilled","rcBank","rcCash"].forEach(id=> $(id).value="");
+  toast(`調整 ${yen(Math.abs(n.balDiff))} を記録しました`);
+}
+
 function renderStats(){
   $("stMonth").textContent = monthLabel(stMonth);
   const cb=currentBalance();
@@ -838,6 +968,7 @@ function renderStats(){
   $("upcomingNextLabel").textContent = monthLabel(nextYm);
   $("upcomingThis").textContent = yen(upcomingRecurringTotal(thisYm) + unpaidInMonth(thisYm));
   $("upcomingNext").textContent = yen(upcomingRecurringTotal(nextYm) + unpaidInMonth(nextYm));
+  renderReconcile();
   const recs = recOfMonth(stMonth);
   let inc=0,exp=0;
   recs.forEach(r=>{ if(r.type==="income") inc+=r.amount; else exp+=r.amount; });
